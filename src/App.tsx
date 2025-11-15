@@ -556,7 +556,73 @@ const cityTimeseriesQuery = useQuery({
 				alt="Hack Pompey"
 				style={{ width: 200, height: 'auto', display: 'block', margin: '0 auto 24px auto' }}
 			/>
-			<h1>SSEN — per-capita energy comparison</h1>
+			<h1>SSEN — energy consumption comparison</h1>
+
+			{/* City power summary (moved to top) */}
+			<div style={{ marginTop: 28 }}>
+				<h2>Portsmouth VS Southampton - who is more energy efficient?</h2>
+				{cityPowerQuery.isLoading && <div>Computing city power...</div>}
+				{cityPowerQuery.isError && <div style={{ color: 'crimson' }}>Error computing city power: {(cityPowerQuery.error as Error)?.message ?? String(cityPowerQuery.error)}</div>}
+				{!cityPowerQuery.isLoading && !cityPowerQuery.isError && cityPowerQuery.data && (
+					<div>
+						{/** compute 24h averages once to reuse in the table and per-person calcs */}
+						{(() => {
+							const portSeries = cityTimeseriesQuery.data?.portSeries ?? [] as any[]
+							const southSeries = cityTimeseriesQuery.data?.southSeries ?? [] as any[]
+							const port24hAvg = (portSeries.reduce((s: number, p: any) => s + (p.valueKW ?? 0), 0) ?? 0) / Math.max(1, portSeries.length)
+							const south24hAvg = (southSeries.reduce((s: number, p: any) => s + (p.valueKW ?? 0), 0) ?? 0) / Math.max(1, southSeries.length)
+							return (
+								<>
+									{/* expose computed values to the JSX below via closure */}
+									{/* @ts-ignore */}
+									<div style={{ display: 'none' }} data-port24avg={port24hAvg} data-south24avg={south24hAvg} />
+								</>
+							)
+						})()}
+						<table style={{ width: '100%', maxWidth: 700, borderCollapse: 'collapse', margin: '0 auto' }}>
+							<thead>
+								<tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+									<th>City</th>
+									<th>Estimated power (kW)</th>
+									<th>24h avg (kW)</th>
+									<th>Estimated energy / hour (kWh)</th>
+									<th>kW per person</th>
+									<th>W per person</th>
+									<th>24h avg kW/person</th>
+									<th>24h avg W/person</th>
+								</tr>
+							</thead>
+							<tbody>
+								<tr>
+									<td>Portsmouth</td>
+									<td>{formatNumber(cityPowerQuery.data.port.cityPowerKW)}</td>
+									<td>{formatNumber((cityTimeseriesQuery.data?.portSeries?.reduce((s: number, p: any) => s + (p.valueKW ?? 0), 0) ?? 0) / Math.max(1, (cityTimeseriesQuery.data?.portSeries?.length ?? 0)))}</td>
+									<td>{formatNumber(cityPowerQuery.data.port.cityEnergyPerHourKWh)}</td>
+									<td>{formatNumber((cityPowerQuery.data.port.cityPowerKW ?? 0) / (PORTSMOUTH_POP || 1))}</td>
+									<td>{formatNumber(((cityPowerQuery.data.port.cityPowerKW ?? 0) * 1000) / (PORTSMOUTH_POP || 1))}</td>
+									<td>{formatNumber(((cityTimeseriesQuery.data?.portSeries?.reduce((s: number, p: any) => s + (p.valueKW ?? 0), 0) ?? 0) / Math.max(1, (cityTimeseriesQuery.data?.portSeries?.length ?? 0))) / (PORTSMOUTH_POP || 1))}</td>
+									<td>{formatNumber((((cityTimeseriesQuery.data?.portSeries?.reduce((s: number, p: any) => s + (p.valueKW ?? 0), 0) ?? 0) / Math.max(1, (cityTimeseriesQuery.data?.portSeries?.length ?? 0))) * 1000) / (PORTSMOUTH_POP || 1))}</td>
+								</tr>
+								<tr>
+									<td>Southampton</td>
+									<td>{formatNumber(cityPowerQuery.data.south.cityPowerKW)}</td>
+									<td>{formatNumber((cityTimeseriesQuery.data?.southSeries?.reduce((s: number, p: any) => s + (p.valueKW ?? 0), 0) ?? 0) / Math.max(1, (cityTimeseriesQuery.data?.southSeries?.length ?? 0)))}</td>
+									<td>{formatNumber(cityPowerQuery.data.south.cityEnergyPerHourKWh)}</td>
+									<td>{formatNumber((cityPowerQuery.data.south.cityPowerKW ?? 0) / (SOUTHAMPTON_POP || 1))}</td>
+									<td>{formatNumber(((cityPowerQuery.data.south.cityPowerKW ?? 0) * 1000) / (SOUTHAMPTON_POP || 1))}</td>
+									<td>{formatNumber(((cityTimeseriesQuery.data?.southSeries?.reduce((s: number, p: any) => s + (p.valueKW ?? 0), 0) ?? 0) / Math.max(1, (cityTimeseriesQuery.data?.southSeries?.length ?? 0))) / (SOUTHAMPTON_POP || 1))}</td>
+									<td>{formatNumber((((cityTimeseriesQuery.data?.southSeries?.reduce((s: number, p: any) => s + (p.valueKW ?? 0), 0) ?? 0) / Math.max(1, (cityTimeseriesQuery.data?.southSeries?.length ?? 0))) * 1000) / (SOUTHAMPTON_POP || 1))}</td>
+								</tr>
+							</tbody>
+						</table>
+
+						<details style={{ marginTop: 12 }}>
+							<summary>Per-substation breakdown</summary>
+							<pre style={{ whiteSpace: 'pre-wrap', maxHeight: 320, overflow: 'auto' }}>{JSON.stringify(cityPowerQuery.data, null, 2)}</pre>
+							</details>
+					</div>
+				)}
+			</div>
 
 
 
@@ -631,71 +697,7 @@ const cityTimeseriesQuery = useQuery({
 						</div>
 					)}
 				</div>
-			{/* City power summary */}
-			<div style={{ marginTop: 28 }}>
-				<h2>Estimated city power & energy</h2>
-				{cityPowerQuery.isLoading && <div>Computing city power...</div>}
-				{cityPowerQuery.isError && <div style={{ color: 'crimson' }}>Error computing city power: {(cityPowerQuery.error as Error)?.message ?? String(cityPowerQuery.error)}</div>}
-				{!cityPowerQuery.isLoading && !cityPowerQuery.isError && cityPowerQuery.data && (
-					<div>
-						{/** compute 24h averages once to reuse in the table and per-person calcs */}
-						{(() => {
-							const portSeries = cityTimeseriesQuery.data?.portSeries ?? [] as any[]
-							const southSeries = cityTimeseriesQuery.data?.southSeries ?? [] as any[]
-							const port24hAvg = (portSeries.reduce((s: number, p: any) => s + (p.valueKW ?? 0), 0) ?? 0) / Math.max(1, portSeries.length)
-							const south24hAvg = (southSeries.reduce((s: number, p: any) => s + (p.valueKW ?? 0), 0) ?? 0) / Math.max(1, southSeries.length)
-							return (
-								<>
-									{/* expose computed values to the JSX below via closure */}
-									{/* @ts-ignore */}
-									<div style={{ display: 'none' }} data-port24avg={port24hAvg} data-south24avg={south24hAvg} />
-								</>
-							)
-						})()}
-						<table style={{ width: '100%', maxWidth: 700, borderCollapse: 'collapse', margin: '0 auto' }}>
-							<thead>
-								<tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
-									<th>City</th>
-									<th>Estimated power (kW)</th>
-									<th>24h avg (kW)</th>
-									<th>Estimated energy / hour (kWh)</th>
-									<th>kW per person</th>
-									<th>W per person</th>
-									<th>24h avg kW/person</th>
-									<th>24h avg W/person</th>
-								</tr>
-							</thead>
-							<tbody>
-								<tr>
-									<td>Portsmouth</td>
-									<td>{formatNumber(cityPowerQuery.data.port.cityPowerKW)}</td>
-									<td>{formatNumber((cityTimeseriesQuery.data?.portSeries?.reduce((s: number, p: any) => s + (p.valueKW ?? 0), 0) ?? 0) / Math.max(1, (cityTimeseriesQuery.data?.portSeries?.length ?? 0)))}</td>
-									<td>{formatNumber(cityPowerQuery.data.port.cityEnergyPerHourKWh)}</td>
-									<td>{formatNumber((cityPowerQuery.data.port.cityPowerKW ?? 0) / (PORTSMOUTH_POP || 1))}</td>
-									<td>{formatNumber(((cityPowerQuery.data.port.cityPowerKW ?? 0) * 1000) / (PORTSMOUTH_POP || 1))}</td>
-									<td>{formatNumber(((cityTimeseriesQuery.data?.portSeries?.reduce((s: number, p: any) => s + (p.valueKW ?? 0), 0) ?? 0) / Math.max(1, (cityTimeseriesQuery.data?.portSeries?.length ?? 0))) / (PORTSMOUTH_POP || 1))}</td>
-									<td>{formatNumber((((cityTimeseriesQuery.data?.portSeries?.reduce((s: number, p: any) => s + (p.valueKW ?? 0), 0) ?? 0) / Math.max(1, (cityTimeseriesQuery.data?.portSeries?.length ?? 0))) * 1000) / (PORTSMOUTH_POP || 1))}</td>
-								</tr>
-								<tr>
-									<td>Southampton</td>
-									<td>{formatNumber(cityPowerQuery.data.south.cityPowerKW)}</td>
-									<td>{formatNumber((cityTimeseriesQuery.data?.southSeries?.reduce((s: number, p: any) => s + (p.valueKW ?? 0), 0) ?? 0) / Math.max(1, (cityTimeseriesQuery.data?.southSeries?.length ?? 0)))}</td>
-									<td>{formatNumber(cityPowerQuery.data.south.cityEnergyPerHourKWh)}</td>
-									<td>{formatNumber((cityPowerQuery.data.south.cityPowerKW ?? 0) / (SOUTHAMPTON_POP || 1))}</td>
-									<td>{formatNumber(((cityPowerQuery.data.south.cityPowerKW ?? 0) * 1000) / (SOUTHAMPTON_POP || 1))}</td>
-									<td>{formatNumber(((cityTimeseriesQuery.data?.southSeries?.reduce((s: number, p: any) => s + (p.valueKW ?? 0), 0) ?? 0) / Math.max(1, (cityTimeseriesQuery.data?.southSeries?.length ?? 0))) / (SOUTHAMPTON_POP || 1))}</td>
-									<td>{formatNumber((((cityTimeseriesQuery.data?.southSeries?.reduce((s: number, p: any) => s + (p.valueKW ?? 0), 0) ?? 0) / Math.max(1, (cityTimeseriesQuery.data?.southSeries?.length ?? 0))) * 1000) / (SOUTHAMPTON_POP || 1))}</td>
-								</tr>
-							</tbody>
-						</table>
 
-						<details style={{ marginTop: 12 }}>
-							<summary>Per-substation breakdown</summary>
-							<pre style={{ whiteSpace: 'pre-wrap', maxHeight: 320, overflow: 'auto' }}>{JSON.stringify(cityPowerQuery.data, null, 2)}</pre>
-							</details>
-					</div>
-				)}
-			</div>
 		</div>
 	)
 }
