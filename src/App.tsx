@@ -299,7 +299,7 @@ function App() {
 	const [selectedA, setSelectedA] = useState<string | undefined>(undefined)
 	const [selectedB, setSelectedB] = useState<string | undefined>(undefined)
 
-	// compute estimated power for a single BSP UUID
+	// compute estimated power for a single BSP UUID, including 24h average
 	const computeBspPower = async (uuid?: string) => {
 		if (!uuid) return null
 		try {
@@ -311,19 +311,49 @@ function App() {
 			const lines = Array.isArray(sourceSub.lines) ? sourceSub.lines : []
 			let bspPowerW = 0
 			const lineDetails: any[] = []
+			// for 24h average
+			const afterISO = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+			let sumPowerEntriesW = 0
+			let countPowerEntries = 0
 			for (const line of lines) {
 				const lineId = line.line_name ?? line.lineId ?? line.id ?? line.name ?? 'unknown-line'
 				const meas = getMeasurementIdsFromLine(line)
 				let foundCurrent: number | undefined
 				let usedMeasurement: string | undefined
 				for (const m of meas) {
+					// instantaneous (fallback) measurement
 					const resp = await fetchMeasurementWithFallback(m.id)
 					const factor = unitMultiplierToFactor(m.unitMultiplier)
 					const curr = extractLineCurrent(resp, factor)
 					if (curr != null) {
 						foundCurrent = curr
 						usedMeasurement = m.id
-						break
+						// do not break — still fetch history for 24h average below
+					}
+					// fetch 24h history for this measurement id and aggregate
+					const hist = await fetchMeasurementAfter(m.id, afterISO)
+					if (hist) {
+						const entries: Array<{ __ts?: string; value?: number }> = []
+						if (Array.isArray(hist.AnalogValues)) {
+							for (const av of hist.AnalogValues) {
+								if (Array.isArray(av.value_history)) {
+									for (const e of av.value_history) entries.push(e)
+								}
+							}
+						}
+						if (Array.isArray(hist.value_history)) {
+							for (const e of hist.value_history) entries.push(e)
+						}
+						if (!entries.length && typeof hist.value === 'number') {
+							entries.push({ __ts: hist.timeStamp ?? hist.timeStamp, value: hist.value })
+						}
+						for (const e of entries) {
+							if (!e || typeof e.value !== 'number' || !e.__ts) continue
+							const currentA = Number(e.value) * factor
+							const powerW = SQRT3 * NOMINAL_VOLTAGE * currentA * POWER_FACTOR
+							sumPowerEntriesW += powerW
+							countPowerEntries += 1
+						}
 					}
 				}
 				if (foundCurrent != null) {
@@ -332,7 +362,8 @@ function App() {
 				}
 				lineDetails.push({ lineId, foundCurrent, usedMeasurement })
 			}
-			return { uuid, bspPowerKW: bspPowerW / 1000, details: lineDetails }
+			const avg24hKW = countPowerEntries ? (sumPowerEntriesW / countPowerEntries) / 1000 : null
+			return { uuid, bspPowerKW: bspPowerW / 1000, bsp24hAvgKW: avg24hKW, details: lineDetails }
 		} catch (e: any) {
 			return { error: String(e) }
 		}
@@ -529,28 +560,7 @@ const cityTimeseriesQuery = useQuery({
 
 
 
-			{/* Timeseries chart */}
-			<div style={{ marginTop: 28 }}>
-				<h2>24h power (kW) — Portsmouth vs Southampton</h2>
-				{cityTimeseriesQuery.isLoading && <div>Fetching 24h histories...</div>}
-				{cityTimeseriesQuery.isError && <div style={{ color: 'crimson' }}>Error fetching timeseries: {(cityTimeseriesQuery.error as Error)?.message ?? String(cityTimeseriesQuery.error)}</div>}
-				{!cityTimeseriesQuery.isLoading && !cityTimeseriesQuery.isError && cityTimeseriesQuery.data && (
-					<div>
-						<TimeSeriesChart
-							width={700}
-							height={220}
-							seriesA={cityTimeseriesQuery.data.portSeries}
-							seriesB={cityTimeseriesQuery.data.southSeries}
-							labelA="Portsmouth"
-							labelB="Southampton"
-						/>
-						<details style={{ marginTop: 12 }}>
-							<summary>Raw timeseries</summary>
-							<pre style={{ whiteSpace: 'pre-wrap', maxHeight: 320, overflow: 'auto' }}>{JSON.stringify(cityTimeseriesQuery.data, null, 2)}</pre>
-						</details>
-					</div>
-				)}
-			</div>
+
 
 				{/* BSP comparison controls */}
 				<div style={{ marginTop: 20, maxWidth: 800, marginLeft: 'auto', marginRight: 'auto' }}>
@@ -574,6 +584,7 @@ const cityTimeseriesQuery = useQuery({
 									<div style={{ marginTop: 8 }}>
 										<strong>A:</strong> {bspsQuery.data.find((x: any) => x.UUID === selectedA)?.name ?? selectedA}
 										<div>Estimated power: {bspAQuery.data.bspPowerKW != null ? formatNumber(bspAQuery.data.bspPowerKW) + ' kW' : 'N/A'}</div>
+										<div>Estimated 24h avg: {bspAQuery.data.bsp24hAvgKW != null ? formatNumber(bspAQuery.data.bsp24hAvgKW) + ' kW' : 'N/A'}</div>
 										<details>
 											<summary>Per-line details</summary>
 											<pre style={{ whiteSpace: 'pre-wrap', maxHeight: 240, overflow: 'auto' }}>{JSON.stringify(bspAQuery.data.details, null, 2)}</pre>
@@ -596,6 +607,7 @@ const cityTimeseriesQuery = useQuery({
 									<div style={{ marginTop: 8 }}>
 										<strong>B:</strong> {bspsQuery.data.find((x: any) => x.UUID === selectedB)?.name ?? selectedB}
 										<div>Estimated power: {bspBQuery.data.bspPowerKW != null ? formatNumber(bspBQuery.data.bspPowerKW) + ' kW' : 'N/A'}</div>
+										<div>Estimated 24h avg: {bspBQuery.data.bsp24hAvgKW != null ? formatNumber(bspBQuery.data.bsp24hAvgKW) + ' kW' : 'N/A'}</div>
 										<details>
 											<summary>Per-line details</summary>
 											<pre style={{ whiteSpace: 'pre-wrap', maxHeight: 240, overflow: 'auto' }}>{JSON.stringify(bspBQuery.data.details, null, 2)}</pre>
@@ -612,6 +624,10 @@ const cityTimeseriesQuery = useQuery({
 								A: {formatNumber(bspAQuery.data.bspPowerKW ?? 0)} kW — B: {formatNumber(bspBQuery.data.bspPowerKW ?? 0)} kW
 							</p>
 							<p>Difference (A − B): {formatNumber((bspAQuery.data.bspPowerKW ?? 0) - (bspBQuery.data.bspPowerKW ?? 0))} kW</p>
+							<p>
+								24h avg A: {formatNumber(bspAQuery.data.bsp24hAvgKW ?? 0)} kW — 24h avg B: {formatNumber(bspBQuery.data.bsp24hAvgKW ?? 0)} kW
+							</p>
+							<p>24h avg difference (A − B): {formatNumber((bspAQuery.data.bsp24hAvgKW ?? 0) - (bspBQuery.data.bsp24hAvgKW ?? 0))} kW</p>
 						</div>
 					)}
 				</div>
@@ -685,59 +701,3 @@ const cityTimeseriesQuery = useQuery({
 }
 
 export default App
-
-// --- Inline TimeSeriesChart component ----------------------------------
-function TimeSeriesChart({
-	width = 700,
-	height = 220,
-	seriesA = [],
-	seriesB = [],
-	labelA = 'A',
-	labelB = 'B',
-}: any) {
-	// series items: { ts: number, valueKW: number }
-	const pad = 36
-	const all = [...(seriesA || []), ...(seriesB || [])]
-	if (!all.length) {
-		return <div>No series data</div>
-	}
-	const minT = Math.min(...all.map((s: any) => s.ts))
-	const maxT = Math.max(...all.map((s: any) => s.ts))
-	const maxV = Math.max(...all.map((s: any) => s.valueKW))
-	const x = (ts: number) => pad + ((ts - minT) / Math.max(1, maxT - minT)) * (width - pad * 2)
-	const y = (v: number) => height - pad - (v / Math.max(1, maxV)) * (height - pad * 2)
-
-	const pathFor = (series: any[]) => {
-		if (!series || !series.length) return ''
-		return series.map((p: any, i: number) => `${i === 0 ? 'M' : 'L'} ${x(p.ts)} ${y(p.valueKW)}`).join(' ')
-	}
-
-	const pathA = pathFor(seriesA)
-	const pathB = pathFor(seriesB)
-
-	return (
-		<div>
-			<svg width={width} height={height}>
-				{/* background grid */}
-				<rect x={0} y={0} width={width} height={height} fill="#fff" stroke="#eee" />
-				{/* y axis labels */}
-				{[0, 0.25, 0.5, 0.75, 1].map((t) => {
-					const v = t * maxV
-					return (
-						<g key={t}>
-							<line x1={pad} x2={width - pad} y1={y(v)} y2={y(v)} stroke="#f0f0f0" />
-							<text x={6} y={y(v) + 4} fontSize={10} fill="#666">{formatNumber(v)}</text>
-						</g>
-					)
-				})}
-				{/* paths */}
-				{pathA && <path d={pathA} fill="none" stroke="#1f77b4" strokeWidth={2} />}
-				{pathB && <path d={pathB} fill="none" stroke="#ff7f0e" strokeWidth={2} />}
-			</svg>
-			<div style={{ display: 'flex', gap: 12, marginTop: 6 }}>
-				<div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 12, height: 12, background: '#1f77b4', display: 'inline-block' }} />{labelA}</div>
-				<div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 12, height: 12, background: '#ff7f0e', display: 'inline-block' }} />{labelB}</div>
-			</div>
-		</div>
-	)
-}
